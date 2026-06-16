@@ -15,6 +15,7 @@ baglan();
 app.use('/api/kullanicilar', require('./routes/kullanicilar'));
 app.use('/api/isletmeler', require('./routes/isletmeler'));
 app.use('/api/randevular', require('./routes/randevular'));
+app.use('/api/yorumlar', require('./routes/yorumlar'));
 
 // Test endpoint'i
 app.get('/', (req, res) => {
