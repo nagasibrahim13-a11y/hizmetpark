@@ -16,6 +16,8 @@ app.use('/api/kullanicilar', require('./routes/kullanicilar'));
 app.use('/api/isletmeler', require('./routes/isletmeler'));
 app.use('/api/randevular', require('./routes/randevular'));
 app.use('/api/yorumlar', require('./routes/yorumlar'));
+app.use('/api/sadakat', require('./routes/sadakat'));
+
 
 // Test endpoint'i
 app.get('/', (req, res) => {
