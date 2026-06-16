@@ -17,6 +17,7 @@ app.use('/api/isletmeler', require('./routes/isletmeler'));
 app.use('/api/randevular', require('./routes/randevular'));
 app.use('/api/yorumlar', require('./routes/yorumlar'));
 app.use('/api/sadakat', require('./routes/sadakat'));
+app.use('/api/reklamlar', require('./routes/reklamlar'));
 
 
 // Test endpoint'i
