@@ -3,9 +3,11 @@ const mongoose = require('mongoose');
 const randevuSemasi = new mongoose.Schema({
   musteri: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Kullanici',
-    required: true
+    ref: 'Kullanici'
   },
+  musteriAdi: { type: String },
+  musteriTelefon: { type: String },
+  manuelMi: { type: Boolean, default: false },
   isletme: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Isletme',

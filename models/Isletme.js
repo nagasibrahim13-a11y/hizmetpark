@@ -21,7 +21,7 @@ const isletmeSemasi = new mongoose.Schema({
     acikAdres: String
   },
   konum: {
-    type: { type: String, default: 'Point' },
+    type: { type: String },
     coordinates: [Number]
   },
   telefon: String,
@@ -34,11 +34,23 @@ const isletmeSemasi = new mongoose.Schema({
   hizmetler: [{ ad: String, sure: Number, fiyat: Number }],
   ortalamaPuan: { type: Number, default: 0 },
   yorumSayisi: { type: Number, default: 0 },
+  kapaliTarihler: [{
+    tarih: { type: Date, required: true },
+    tumGun: { type: Boolean, default: true },
+    saatler: [String],
+    aciklama: String
+  }],
   aktif: { type: Boolean, default: true },
   olusturmaTarihi: { type: Date, default: Date.now }
 });
 
-isletmeSemasi.index({ konum: '2dsphere' });
+isletmeSemasi.pre('save', async function () {
+  if (this.konum && (!this.konum.coordinates || this.konum.coordinates.length < 2)) {
+    this.konum = null;
+  }
+});
+
+isletmeSemasi.index({ konum: '2dsphere' }, { sparse: true });
 
 const Isletme = mongoose.model('Isletme', isletmeSemasi);
 module.exports = Isletme;

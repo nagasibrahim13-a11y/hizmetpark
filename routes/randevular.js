@@ -2,11 +2,33 @@ const express = require('express');
 const router = express.Router();
 const Randevu = require('../models/Randevu');
 const Sadakat = require('../models/Sadakat');
+const Isletme = require('../models/Isletme');
 
 // Randevu oluştur
 router.post('/', async (req, res) => {
   try {
-    const { hediyeMi, sadakatId } = req.body;
+    const { hediyeMi, sadakatId, isletme: isletmeId, tarih, saat } = req.body;
+
+    // Kapalı tarih kontrolü
+    if (isletmeId && tarih) {
+      const isletmeDoc = await Isletme.findById(isletmeId);
+      const tarihStr = new Date(tarih).toISOString().split('T')[0];
+      console.log('[RANDEVU KONTROL] isletmeId:', isletmeId,
+        '| istenen tarih:', tarihStr,
+        '| saat:', saat,
+        '| kapaliTarihSayisi:', isletmeDoc?.kapaliTarihler?.length ?? 'isletme bulunamadi');
+      if (isletmeDoc && isletmeDoc.kapaliTarihler?.length > 0) {
+        const kapali = isletmeDoc.kapaliTarihler.find(kt => {
+          const ktStr = new Date(kt.tarih).toISOString().split('T')[0];
+          const eslesti = ktStr === tarihStr && (kt.tumGun || kt.saatler?.includes(saat));
+          if (eslesti) console.log('[RANDEVU KONTROL] KAPALI ESLESTI:', { ktStr, tumGun: kt.tumGun, saatler: kt.saatler });
+          return eslesti;
+        });
+        if (kapali) {
+          return res.status(400).json({ hata: 'Bu tarih ve saatte işletme kapalıdır.' });
+        }
+      }
+    }
 
     // Hediye randevu ise sadakat kartını kontrol et
     if (hediyeMi && sadakatId) {
@@ -34,6 +56,7 @@ router.get('/isletme/:isletmeId', async (req, res) => {
     const randevular = await Randevu.find({ isletme: req.params.isletmeId })
       .populate('musteri', 'ad soyad telefon')
       .sort({ tarih: 1, saat: 1 });
+    // musteriAdi/musteriTelefon zaten dokümanda mevcut, populate sonrası otomatik gelir
     res.json(randevular);
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
@@ -62,8 +85,8 @@ router.put('/:id/durum', async (req, res) => {
       { new: true }
     ).populate('musteri', 'ad soyad');
 
-    // Tamamlandıysa sadakat puanı ekle (hediye randevu değilse)
-    if (durum === 'tamamlandi' && !randevu.hediyeMi) {
+    // Tamamlandıysa sadakat puanı ekle (hediye randevu değilse, manuel randevu değilse)
+    if (durum === 'tamamlandi' && !randevu.hediyeMi && randevu.musteri) {
       let sadakat = await Sadakat.findOne({
         musteri: randevu.musteri._id,
         isletme: randevu.isletme

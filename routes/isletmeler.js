@@ -96,4 +96,36 @@ router.delete('/:id/hizmet/:hizmetId', async (req, res) => {
   }
 });
 
+// Kapalı tarih ekle
+router.put('/:id/kapali-tarih', async (req, res) => {
+  try {
+    const isletme = await Isletme.findById(req.params.id);
+    if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+    isletme.kapaliTarihler.push(req.body);
+    await isletme.save();
+    console.log('[KAPALI TARIH EKLENDI] isletmeId:', req.params.id,
+      '| tarih:', req.body.tarih,
+      '| tumGun:', req.body.tumGun,
+      '| DB kaydi:', isletme.kapaliTarihler[isletme.kapaliTarihler.length - 1]);
+    res.json({ mesaj: 'Kapalı tarih eklendi', isletme });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
+// Kapalı tarih kaldır
+router.delete('/:id/kapali-tarih/:tarihId', async (req, res) => {
+  try {
+    const isletme = await Isletme.findById(req.params.id);
+    if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+    isletme.kapaliTarihler = isletme.kapaliTarihler.filter(
+      t => t._id.toString() !== req.params.tarihId
+    );
+    await isletme.save();
+    res.json({ mesaj: 'Kapalı tarih kaldırıldı' });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
 module.exports = router;
