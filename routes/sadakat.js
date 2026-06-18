@@ -17,12 +17,16 @@ router.get('/musteri/:musteriId', async (req, res) => {
 // İşletmenin sadakat ayarlarını güncelle
 router.put('/isletme/:isletmeId', async (req, res) => {
   try {
-    const { hedefZiyaret, hediye } = req.body;
+    const { hedefZiyaret, hediye, vipHedef, vipHediye } = req.body;
+
+    const guncelleme = { 'odul.hedefZiyaret': hedefZiyaret, 'odul.hediye': hediye };
+    if (vipHedef !== undefined) guncelleme['odul.vipHedef'] = vipHedef;
+    if (vipHediye !== undefined) guncelleme['odul.vipHediye'] = vipHediye;
 
     // Bu işletmedeki tüm sadakat kartlarını güncelle
     await Sadakat.updateMany(
       { isletme: req.params.isletmeId },
-      { 'odul.hedefZiyaret': hedefZiyaret, 'odul.hediye': hediye }
+      guncelleme
     );
 
     res.json({ mesaj: 'Sadakat ayarları güncellendi' });

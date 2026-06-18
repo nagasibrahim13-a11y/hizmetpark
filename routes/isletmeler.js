@@ -193,4 +193,38 @@ router.delete('/:id/personel/:personelId', async (req, res) => {
   }
 });
 
+// Premium aktif et (admin kullanır)
+router.put('/:id/premium', async (req, res) => {
+  try {
+    const { paket } = req.body; // 'aylik' veya 'yillik'
+    const sure = paket === 'yillik' ? 365 : 30;
+    const bitis = new Date();
+    bitis.setDate(bitis.getDate() + sure);
+    const isletme = await Isletme.findByIdAndUpdate(
+      req.params.id,
+      { premium: { aktif: true, baslangic: new Date(), bitis, paket } },
+      { new: true }
+    );
+    if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+    res.json({ mesaj: 'Premium aktif edildi', premium: isletme.premium });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
+// Premium iptal et
+router.put('/:id/premium/iptal', async (req, res) => {
+  try {
+    const isletme = await Isletme.findByIdAndUpdate(
+      req.params.id,
+      { premium: { aktif: false, baslangic: null, bitis: null, paket: null } },
+      { new: true }
+    );
+    if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+    res.json({ mesaj: 'Premium iptal edildi' });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
 module.exports = router;

@@ -8,7 +8,10 @@ const kullaniciSemasi = new mongoose.Schema({
   sifre: { type: String },
   googleId: { type: String },
   rol: { type: String, enum: ['musteri', 'isletme'], default: 'musteri' },
-  kayitTarihi: { type: Date, default: Date.now }
+  kayitTarihi: { type: Date, default: Date.now },
+  vipMi: { type: Boolean, default: false },
+  toplamHarcama: { type: Number, default: 0 },
+  segment: { type: String, enum: ['yeni', 'duzenli', 'vip'], default: 'yeni' }
 });
 
 const Kullanici = mongoose.model('Kullanici', kullaniciSemasi);

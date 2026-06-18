@@ -64,6 +64,84 @@ router.post('/', async (req, res) => {
   }
 });
 
+// İşletme analitikleri
+router.get('/isletme/:isletmeId/analitik', async (req, res) => {
+  try {
+    const { isletmeId } = req.params;
+    const otuzGunOnce = new Date();
+    otuzGunOnce.setDate(otuzGunOnce.getDate() - 30);
+
+    const tumRandevular = await Randevu.find({ isletme: isletmeId })
+      .populate('musteri', 'ad soyad');
+
+    const sonOtuzGun = tumRandevular.filter(r => new Date(r.tarih) >= otuzGunOnce);
+
+    // Günlük istatistikler
+    const gunlukMap = {};
+    sonOtuzGun.forEach(r => {
+      const gun = new Date(r.tarih).toISOString().split('T')[0];
+      if (!gunlukMap[gun]) gunlukMap[gun] = { tarih: gun, randevu: 0, ciro: 0 };
+      gunlukMap[gun].randevu++;
+      if (r.durum === 'tamamlandi' && !r.hediyeMi) {
+        const tutar = Array.isArray(r.hizmet) ? r.hizmet.reduce((t, h) => t + (h.fiyat || 0), 0) : (r.hizmet?.fiyat || 0);
+        gunlukMap[gun].ciro += tutar;
+      }
+    });
+    const gunlukVeriler = Object.values(gunlukMap).sort((a, b) => a.tarih.localeCompare(b.tarih));
+
+    // Toplam istatistikler
+    const toplamCiro = tumRandevular
+      .filter(r => r.durum === 'tamamlandi' && !r.hediyeMi)
+      .reduce((t, r) => {
+        const tutar = Array.isArray(r.hizmet) ? r.hizmet.reduce((s, h) => s + (h.fiyat || 0), 0) : (r.hizmet?.fiyat || 0);
+        return t + tutar;
+      }, 0);
+
+    // En popüler hizmetler
+    const hizmetMap = {};
+    tumRandevular.forEach(r => {
+      const hizmetler = Array.isArray(r.hizmet) ? r.hizmet : [r.hizmet];
+      hizmetler.forEach(h => {
+        if (!h?.ad) return;
+        if (!hizmetMap[h.ad]) hizmetMap[h.ad] = { ad: h.ad, sayi: 0, ciro: 0 };
+        hizmetMap[h.ad].sayi++;
+        hizmetMap[h.ad].ciro += (h.fiyat || 0);
+      });
+    });
+    const populerHizmetler = Object.values(hizmetMap).sort((a, b) => b.sayi - a.sayi).slice(0, 5);
+
+    // Müşteri segmentleri
+    const musteriMap = {};
+    tumRandevular.forEach(r => {
+      if (!r.musteri) return;
+      const id = r.musteri._id.toString();
+      if (!musteriMap[id]) musteriMap[id] = { ad: `${r.musteri.ad} ${r.musteri.soyad}`, sayi: 0 };
+      musteriMap[id].sayi++;
+    });
+    const musteriler = Object.values(musteriMap);
+    const segmentler = {
+      yeni: musteriler.filter(m => m.sayi === 1).length,
+      duzenli: musteriler.filter(m => m.sayi >= 2 && m.sayi <= 4).length,
+      vip: musteriler.filter(m => m.sayi >= 5).length
+    };
+
+    res.json({
+      gunlukVeriler,
+      ozet: {
+        toplamRandevu: tumRandevular.length,
+        tamamlanan: tumRandevular.filter(r => r.durum === 'tamamlandi').length,
+        iptal: tumRandevular.filter(r => r.durum === 'reddedildi').length,
+        toplamCiro
+      },
+      populerHizmetler,
+      segmentler,
+      topMusteriler: musteriler.sort((a, b) => b.sayi - a.sayi).slice(0, 5)
+    });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
 // İşletmenin randevularını getir
 router.get('/isletme/:isletmeId', async (req, res) => {
   try {

@@ -34,6 +34,14 @@ const sadakatSemasi = new mongoose.Schema({
     hediye: {
       type: String,
       default: 'Ücretsiz Hizmet'
+    },
+    vipHedef: {
+      type: Number,
+      default: 10
+    },
+    vipHediye: {
+      type: String,
+      default: 'VIP Özel Hizmet'
     }
   },
 
@@ -44,6 +52,12 @@ const sadakatSemasi = new mongoose.Schema({
       kullanildi: { type: Boolean, default: false }
     }
   ],
+
+  musteriSegment: {
+    type: String,
+    enum: ['yeni', 'duzenli', 'vip'],
+    default: 'yeni'
+  },
 
   sonGuncelleme: {
     type: Date,

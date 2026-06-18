@@ -48,7 +48,13 @@ const isletmeSemasi = new mongoose.Schema({
     unvan: { type: String, default: 'Çalışan' },
     fotograf: { type: String, default: '' },
     aktif: { type: Boolean, default: true }
-  }]
+  }],
+  premium: {
+    aktif: { type: Boolean, default: false },
+    baslangic: { type: Date, default: null },
+    bitis: { type: Date, default: null },
+    paket: { type: String, enum: ['aylik', 'yillik'], default: null }
+  }
 });
 
 isletmeSemasi.pre('save', async function () {
