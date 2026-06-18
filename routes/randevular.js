@@ -64,6 +64,35 @@ router.post('/', async (req, res) => {
   }
 });
 
+// İşletme doluluk durumu
+router.get('/isletme/:isletmeId/doluluk', async (req, res) => {
+  try {
+    const { isletmeId } = req.params;
+    const { tarih } = req.query;
+    if (!tarih) return res.status(400).json({ hata: 'tarih parametresi zorunlu' });
+
+    const baslangic = new Date(tarih);
+    const bitis = new Date(tarih);
+    bitis.setDate(bitis.getDate() + 1);
+
+    const randevular = await Randevu.find({
+      isletme: isletmeId,
+      tarih: { $gte: baslangic, $lt: bitis },
+      durum: { $in: ['bekliyor', 'onaylandi'] }
+    });
+
+    const saatSayac = {};
+    randevular.forEach(r => {
+      if (!saatSayac[r.saat]) saatSayac[r.saat] = 0;
+      saatSayac[r.saat]++;
+    });
+
+    res.json({ tarih, doluluk: saatSayac });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
 // İşletme analitikleri
 router.get('/isletme/:isletmeId/analitik', async (req, res) => {
   try {
