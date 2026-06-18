@@ -41,7 +41,14 @@ const isletmeSemasi = new mongoose.Schema({
     aciklama: String
   }],
   aktif: { type: Boolean, default: true },
-  olusturmaTarihi: { type: Date, default: Date.now }
+  olusturmaTarihi: { type: Date, default: Date.now },
+  personel: [{
+    _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
+    ad: { type: String, required: true },
+    unvan: { type: String, default: 'Çalışan' },
+    fotograf: { type: String, default: '' },
+    aktif: { type: Boolean, default: true }
+  }]
 });
 
 isletmeSemasi.pre('save', async function () {

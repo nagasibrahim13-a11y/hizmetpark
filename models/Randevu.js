@@ -41,7 +41,8 @@ const randevuSemasi = new mongoose.Schema({
   olusturmaTarihi: {
     type: Date,
     default: Date.now
-  }
+  },
+  personel: { type: mongoose.Schema.Types.ObjectId, default: null }
 });
 
 const Randevu = mongoose.model('Randevu', randevuSemasi);

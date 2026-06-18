@@ -43,8 +43,22 @@ router.post('/', async (req, res) => {
       await sadakat.save();
     }
 
-    const randevu = await Randevu.create(req.body);
-    res.status(201).json({ mesaj: 'Randevu oluşturuldu', randevu });
+    // Çakışma kontrolü
+    const { isletme: isletmeId2, tarih: tarih2, saat: saat2, personel } = req.body;
+    const cakismaFiltre = {
+      isletme: isletmeId2,
+      tarih: tarih2,
+      saat: saat2,
+      durum: { $in: ['bekliyor', 'onaylandi'] }
+    };
+    if (personel) cakismaFiltre.personel = personel;
+    const cakisan = await Randevu.findOne(cakismaFiltre);
+    if (cakisan) {
+      return res.status(409).json({ hata: 'Bu saat dolu, lütfen başka bir saat seçin' });
+    }
+
+    const yeniRandevu = await Randevu.create({ ...req.body, durum: 'onaylandi' });
+    res.status(201).json(yeniRandevu);
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
   }

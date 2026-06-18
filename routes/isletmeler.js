@@ -2,6 +2,32 @@ const express = require('express');
 const router = express.Router();
 const Isletme = require('../models/Isletme');
 
+// Yakındaki işletmeleri listele
+router.get('/yakinimda', async (req, res) => {
+  try {
+    const { lat, lng, mesafe, kategori } = req.query;
+    if (!lat || !lng) {
+      return res.status(400).json({ hata: 'lat ve lng parametreleri zorunludur' });
+    }
+    const filtre = {
+      konum: {
+        $near: {
+          $geometry: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
+          $maxDistance: mesafe ? parseInt(mesafe) : 5000
+        }
+      },
+      'konum.type': { $exists: true }
+    };
+    if (kategori) filtre.kategori = kategori;
+    const isletmeler = await Isletme.find(filtre)
+      .populate('sahip', 'ad soyad')
+      .limit(20);
+    res.json(isletmeler);
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
 // Tüm işletmeleri listele
 router.get('/', async (req, res) => {
   try {
@@ -123,6 +149,45 @@ router.delete('/:id/kapali-tarih/:tarihId', async (req, res) => {
     );
     await isletme.save();
     res.json({ mesaj: 'Kapalı tarih kaldırıldı' });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
+// Personel listesi
+router.get('/:id/personel', async (req, res) => {
+  try {
+    const isletme = await Isletme.findById(req.params.id);
+    if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+    res.json(isletme.personel);
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
+// Personel ekle
+router.post('/:id/personel', async (req, res) => {
+  try {
+    const isletme = await Isletme.findById(req.params.id);
+    if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+    isletme.personel.push(req.body);
+    await isletme.save();
+    res.status(201).json({ mesaj: 'Personel eklendi', personel: isletme.personel });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
+// Personel sil
+router.delete('/:id/personel/:personelId', async (req, res) => {
+  try {
+    const isletme = await Isletme.findById(req.params.id);
+    if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+    isletme.personel = isletme.personel.filter(
+      p => p._id.toString() !== req.params.personelId
+    );
+    await isletme.save();
+    res.json({ mesaj: 'Personel silindi', personel: isletme.personel });
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
   }
