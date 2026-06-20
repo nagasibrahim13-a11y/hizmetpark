@@ -48,8 +48,17 @@ const isletmeSemasi = new mongoose.Schema({
     unvan: { type: String, default: 'Çalışan' },
     fotograf: { type: String, default: '' },
     aktif: { type: Boolean, default: true },
+    telefon: { type: String, default: '' },
     kullaniciAdi: { type: String, default: '' },
-    sifre: { type: String, default: '' }
+    sifre: { type: String, default: '' },
+    calismaGunleri: { type: [String], default: ['Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'] },
+    yetkiliHizmetler: [{ type: String }],
+    izinTarihleri: [{
+      tarih: { type: Date, required: true },
+      tumGun: { type: Boolean, default: true },
+      saatler: { type: [String], default: [] },
+      aciklama: { type: String, default: '' }
+    }]
   }],
   premium: {
     aktif: { type: Boolean, default: false },

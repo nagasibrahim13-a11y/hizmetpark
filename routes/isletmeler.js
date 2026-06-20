@@ -189,8 +189,16 @@ router.post('/:id/personel', async (req, res) => {
   try {
     const isletme = await Isletme.findById(req.params.id);
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
-    const { ad, unvan, kullaniciAdi, sifre } = req.body;
-    isletme.personel.push({ ad, unvan: unvan || 'Çalışan', kullaniciAdi: kullaniciAdi || '', sifre: sifre || '' });
+    const { ad, unvan, telefon, kullaniciAdi, sifre, calismaGunleri, yetkiliHizmetler } = req.body;
+    isletme.personel.push({
+      ad,
+      unvan: unvan || 'Çalışan',
+      telefon: telefon || '',
+      kullaniciAdi: kullaniciAdi || '',
+      sifre: sifre || '',
+      calismaGunleri: calismaGunleri && calismaGunleri.length > 0 ? calismaGunleri : ['Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'],
+      yetkiliHizmetler: yetkiliHizmetler || []
+    });
     await isletme.save();
     res.status(201).json({ mesaj: 'Personel eklendi', personel: isletme.personel });
   } catch (hata) {
@@ -242,6 +250,66 @@ router.put('/:id/premium/iptal', async (req, res) => {
     );
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
     res.json({ mesaj: 'Premium iptal edildi' });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
+// Personel güncelle
+router.put('/:id/personel/:personelId', async (req, res) => {
+  try {
+    const { ad, unvan, telefon, kullaniciAdi, sifre, calismaGunleri, yetkiliHizmetler } = req.body;
+    const isletme = await Isletme.findById(req.params.id);
+    if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+
+    const personel = isletme.personel.id(req.params.personelId);
+    if (!personel) return res.status(404).json({ hata: 'Personel bulunamadı' });
+
+    if (ad !== undefined) personel.ad = ad;
+    if (unvan !== undefined) personel.unvan = unvan;
+    if (telefon !== undefined) personel.telefon = telefon;
+    if (kullaniciAdi !== undefined) personel.kullaniciAdi = kullaniciAdi;
+    if (sifre) personel.sifre = sifre;
+    if (calismaGunleri !== undefined) personel.calismaGunleri = calismaGunleri;
+    if (yetkiliHizmetler !== undefined) personel.yetkiliHizmetler = yetkiliHizmetler;
+
+    await isletme.save();
+    res.json({ mesaj: 'Personel güncellendi', personel: isletme.personel });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
+// Personele izin tarihi ekle
+router.post('/:id/personel/:personelId/izin', async (req, res) => {
+  try {
+    const { tarih, tumGun, saatler, aciklama } = req.body;
+    const isletme = await Isletme.findById(req.params.id);
+    if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+
+    const personel = isletme.personel.id(req.params.personelId);
+    if (!personel) return res.status(404).json({ hata: 'Personel bulunamadı' });
+
+    personel.izinTarihleri.push({ tarih, tumGun: tumGun !== false, saatler: saatler || [], aciklama: aciklama || '' });
+    await isletme.save();
+    res.status(201).json({ mesaj: 'İzin eklendi', izinTarihleri: personel.izinTarihleri });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
+// Personel izin tarihi sil
+router.delete('/:id/personel/:personelId/izin/:izinId', async (req, res) => {
+  try {
+    const isletme = await Isletme.findById(req.params.id);
+    if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+
+    const personel = isletme.personel.id(req.params.personelId);
+    if (!personel) return res.status(404).json({ hata: 'Personel bulunamadı' });
+
+    personel.izinTarihleri = personel.izinTarihleri.filter(i => i._id.toString() !== req.params.izinId);
+    await isletme.save();
+    res.json({ mesaj: 'İzin silindi', izinTarihleri: personel.izinTarihleri });
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
   }

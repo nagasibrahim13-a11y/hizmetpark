@@ -84,6 +84,43 @@ router.post('/', async (req, res) => {
       await sadakat.save();
     }
 
+    // Personel müsaitlik kontrolü
+    const { personel: personelId } = req.body;
+    if (personelId && isletmeId && tarih) {
+      const isletmeDoc2 = await Isletme.findById(isletmeId);
+      const personelDoc = isletmeDoc2?.personel?.find(p => p._id.toString() === personelId);
+
+      if (personelDoc) {
+        const tarihObj = new Date(tarih);
+        const gunler = ['Pazar','Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'];
+        const gunAdi = gunler[tarihObj.getDay()];
+
+        // Çalışma günü kontrolü
+        if (!personelDoc.calismaGunleri.includes(gunAdi)) {
+          return res.status(400).json({ hata: `${personelDoc.ad} bu gün çalışmıyor.` });
+        }
+
+        // İzin tarihi kontrolü
+        const tarihStr = tarihObj.toISOString().split('T')[0];
+        const izinli = personelDoc.izinTarihleri?.find(izin => {
+          const izinStr = new Date(izin.tarih).toISOString().split('T')[0];
+          return izinStr === tarihStr && (izin.tumGun || izin.saatler?.includes(saat));
+        });
+        if (izinli) {
+          return res.status(400).json({ hata: `${personelDoc.ad} bu tarihte izinli.` });
+        }
+
+        // Hizmet yetkisi kontrolü
+        if (personelDoc.yetkiliHizmetler && personelDoc.yetkiliHizmetler.length > 0) {
+          const istenenHizmetler = Array.isArray(req.body.hizmet) ? req.body.hizmet.map(h => h.ad) : [req.body.hizmet?.ad];
+          const yetkisizHizmet = istenenHizmetler.find(h => !personelDoc.yetkiliHizmetler.includes(h));
+          if (yetkisizHizmet) {
+            return res.status(400).json({ hata: `${personelDoc.ad} "${yetkisizHizmet}" hizmetini veremiyor.` });
+          }
+        }
+      }
+    }
+
     // Çakışma kontrolü
     const { isletme: isletmeId2, tarih: tarih2, saat: saat2, personel } = req.body;
     const cakismaFiltre = {
