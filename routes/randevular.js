@@ -4,6 +4,47 @@ const Randevu = require('../models/Randevu');
 const Sadakat = require('../models/Sadakat');
 const Isletme = require('../models/Isletme');
 
+// Saati geçmiş onaylanan randevuları otomatik tamamla + sadakat puanı ekle
+const otomatikTamamla = async () => {
+  try {
+    const simdi = new Date();
+    const gecikenler = await Randevu.find({
+      durum: 'onaylandi',
+      tarih: { $lte: simdi }
+    }).populate('musteri', 'ad soyad');
+
+    for (const randevu of gecikenler) {
+      // Saat kontrolü: tarih alanı sadece gün bilgisi taşıyorsa, saat alanını da kontrol et
+      const randevuZamani = new Date(randevu.tarih);
+      const [saat, dakika] = (randevu.saat || '00:00').split(':');
+      randevuZamani.setHours(parseInt(saat), parseInt(dakika), 0, 0);
+
+      if (randevuZamani > simdi) continue; // henüz saati gelmemiş
+
+      randevu.durum = 'tamamlandi';
+      await randevu.save();
+
+      // Sadakat puanı ekle (hediye randevu değilse, müşteri varsa)
+      if (!randevu.hediyeMi && randevu.musteri) {
+        let sadakat = await Sadakat.findOne({ musteri: randevu.musteri._id, isletme: randevu.isletme });
+        if (!sadakat) {
+          sadakat = await Sadakat.create({ musteri: randevu.musteri._id, isletme: randevu.isletme });
+        }
+        sadakat.mevcutPuan += 1;
+        sadakat.toplamZiyaret += 1;
+        if (sadakat.mevcutPuan >= sadakat.odul.hedefZiyaret) {
+          sadakat.kazanilanOduller.push({ tarih: new Date(), hediye: sadakat.odul.hediye, kullanildi: false });
+          sadakat.mevcutPuan = 0;
+        }
+        sadakat.sonGuncelleme = new Date();
+        await sadakat.save();
+      }
+    }
+  } catch (hata) {
+    console.error('Otomatik tamamlama hatası:', hata.message);
+  }
+};
+
 // Randevu oluştur
 router.post('/', async (req, res) => {
   try {
@@ -174,6 +215,7 @@ router.get('/isletme/:isletmeId/analitik', async (req, res) => {
 // İşletmenin randevularını getir
 router.get('/isletme/:isletmeId', async (req, res) => {
   try {
+    await otomatikTamamla();
     const randevular = await Randevu.find({ isletme: req.params.isletmeId })
       .populate('musteri', 'ad soyad telefon')
       .sort({ tarih: 1, saat: 1 });
@@ -187,6 +229,7 @@ router.get('/isletme/:isletmeId', async (req, res) => {
 // Müşterinin randevularını getir
 router.get('/musteri/:musteriId', async (req, res) => {
   try {
+    await otomatikTamamla();
     const randevular = await Randevu.find({ musteri: req.params.musteriId })
       .populate('isletme', 'isletmeAdi kategori adres')
       .sort({ tarih: -1 });
@@ -196,48 +239,17 @@ router.get('/musteri/:musteriId', async (req, res) => {
   }
 });
 
-// Randevu durum güncelle
-router.put('/:id/durum', async (req, res) => {
+// Randevu iptal et (müşteri veya işletme kullanabilir)
+router.put('/:id/iptal', async (req, res) => {
   try {
-    const { durum } = req.body;
-    const randevu = await Randevu.findByIdAndUpdate(
-      req.params.id,
-      { durum },
-      { new: true }
-    ).populate('musteri', 'ad soyad');
-
-    // Tamamlandıysa sadakat puanı ekle (hediye randevu değilse, manuel randevu değilse)
-    if (durum === 'tamamlandi' && !randevu.hediyeMi && randevu.musteri) {
-      let sadakat = await Sadakat.findOne({
-        musteri: randevu.musteri._id,
-        isletme: randevu.isletme
-      });
-
-      if (!sadakat) {
-        sadakat = await Sadakat.create({
-          musteri: randevu.musteri._id,
-          isletme: randevu.isletme
-        });
-      }
-
-      sadakat.mevcutPuan += 1;
-      sadakat.toplamZiyaret += 1;
-
-      // Ödül kazandı mı?
-      if (sadakat.mevcutPuan >= sadakat.odul.hedefZiyaret) {
-        sadakat.kazanilanOduller.push({
-          tarih: new Date(),
-          hediye: sadakat.odul.hediye,
-          kullanildi: false
-        });
-        sadakat.mevcutPuan = 0;
-      }
-
-      sadakat.sonGuncelleme = new Date();
-      await sadakat.save();
+    const randevu = await Randevu.findById(req.params.id);
+    if (!randevu) return res.status(404).json({ hata: 'Randevu bulunamadı' });
+    if (randevu.durum === 'tamamlandi') {
+      return res.status(400).json({ hata: 'Tamamlanmış randevu iptal edilemez' });
     }
-
-    res.json({ mesaj: `Randevu ${durum}`, randevu });
+    randevu.durum = 'iptal';
+    await randevu.save();
+    res.json({ mesaj: 'Randevu iptal edildi', randevu });
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
   }

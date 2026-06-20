@@ -26,8 +26,8 @@ const randevuSemasi = new mongoose.Schema({
   },
   durum: {
     type: String,
-    enum: ['bekliyor', 'onaylandi', 'reddedildi', 'tamamlandi'],
-    default: 'bekliyor'
+    enum: ['onaylandi', 'tamamlandi', 'iptal'],
+    default: 'onaylandi'
   },
   hediyeMi: {
     type: Boolean,
