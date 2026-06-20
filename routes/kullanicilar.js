@@ -124,4 +124,26 @@ router.get('/:id/favoriler', async (req, res) => {
   }
 });
 
+// İşletmenin VIP müşterilerini listele
+router.get('/isletme/:isletmeId/vip-musteriler', async (req, res) => {
+  try {
+    const Sadakat = require('../models/Sadakat');
+    const sadakatler = await Sadakat.find({ isletme: req.params.isletmeId })
+      .populate('musteri', 'ad soyad email telefon vipMi')
+      .sort({ toplamZiyaret: -1 });
+
+    const vipler = sadakatler
+      .filter(s => s.musteri?.vipMi)
+      .map(s => ({
+        musteri: s.musteri,
+        toplamZiyaret: s.toplamZiyaret,
+        mevcutPuan: s.mevcutPuan
+      }));
+
+    res.json(vipler);
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
 module.exports = router;

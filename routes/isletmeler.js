@@ -189,11 +189,12 @@ router.post('/:id/personel', async (req, res) => {
   try {
     const isletme = await Isletme.findById(req.params.id);
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
-    const { ad, unvan, telefon, kullaniciAdi, sifre, calismaGunleri, yetkiliHizmetler } = req.body;
+    const { ad, unvan, telefon, maas, kullaniciAdi, sifre, calismaGunleri, yetkiliHizmetler } = req.body;
     isletme.personel.push({
       ad,
       unvan: unvan || 'Çalışan',
       telefon: telefon || '',
+      maas: maas || 0,
       kullaniciAdi: kullaniciAdi || '',
       sifre: sifre || '',
       calismaGunleri: calismaGunleri && calismaGunleri.length > 0 ? calismaGunleri : ['Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'],
@@ -258,7 +259,7 @@ router.put('/:id/premium/iptal', async (req, res) => {
 // Personel güncelle
 router.put('/:id/personel/:personelId', async (req, res) => {
   try {
-    const { ad, unvan, telefon, kullaniciAdi, sifre, calismaGunleri, yetkiliHizmetler } = req.body;
+    const { ad, unvan, telefon, maas, kullaniciAdi, sifre, calismaGunleri, yetkiliHizmetler } = req.body;
     const isletme = await Isletme.findById(req.params.id);
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
 
@@ -268,6 +269,7 @@ router.put('/:id/personel/:personelId', async (req, res) => {
     if (ad !== undefined) personel.ad = ad;
     if (unvan !== undefined) personel.unvan = unvan;
     if (telefon !== undefined) personel.telefon = telefon;
+    if (maas !== undefined) personel.maas = maas;
     if (kullaniciAdi !== undefined) personel.kullaniciAdi = kullaniciAdi;
     if (sifre) personel.sifre = sifre;
     if (calismaGunleri !== undefined) personel.calismaGunleri = calismaGunleri;
@@ -275,6 +277,70 @@ router.put('/:id/personel/:personelId', async (req, res) => {
 
     await isletme.save();
     res.json({ mesaj: 'Personel güncellendi', personel: isletme.personel });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
+// Gider ekle
+router.post('/:id/gider', async (req, res) => {
+  try {
+    const { ad, tutar } = req.body;
+    if (!ad || tutar == null) return res.status(400).json({ hata: 'Gider adı ve tutar gerekli' });
+    const isletme = await Isletme.findById(req.params.id);
+    if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+    isletme.giderler.push({ ad, tutar });
+    await isletme.save();
+    res.status(201).json({ mesaj: 'Gider eklendi', giderler: isletme.giderler });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
+// Gider sil
+router.delete('/:id/gider/:giderId', async (req, res) => {
+  try {
+    const isletme = await Isletme.findById(req.params.id);
+    if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+    isletme.giderler = isletme.giderler.filter(g => g._id.toString() !== req.params.giderId);
+    await isletme.save();
+    res.json({ mesaj: 'Gider silindi', giderler: isletme.giderler });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
+// Net kar hesabı
+router.get('/:id/net-kar', async (req, res) => {
+  try {
+    const isletme = await Isletme.findById(req.params.id);
+    if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+
+    const { baslangic, bitis } = req.query;
+    const Randevu = require('../models/Randevu');
+
+    const filtre = { isletme: req.params.id, durum: 'tamamlandi', hediyeMi: { $ne: true } };
+    if (baslangic || bitis) {
+      filtre.tarih = {};
+      if (baslangic) filtre.tarih.$gte = new Date(baslangic);
+      if (bitis) {
+        const bitisTarih = new Date(bitis);
+        bitisTarih.setHours(23, 59, 59, 999);
+        filtre.tarih.$lte = bitisTarih;
+      }
+    }
+
+    const randevular = await Randevu.find(filtre);
+    const toplamCiro = randevular.reduce((t, r) => {
+      const tutar = Array.isArray(r.hizmet) ? r.hizmet.reduce((s, h) => s + (h.fiyat || 0), 0) : (r.hizmet?.fiyat || 0);
+      return t + tutar;
+    }, 0);
+
+    const toplamMaas = isletme.personel.reduce((t, p) => t + (p.maas || 0), 0);
+    const toplamGider = isletme.giderler.reduce((t, g) => t + (g.tutar || 0), 0);
+    const netKar = toplamCiro - toplamMaas - toplamGider;
+
+    res.json({ toplamCiro, toplamMaas, toplamGider, netKar });
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
   }

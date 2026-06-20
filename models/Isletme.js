@@ -49,6 +49,7 @@ const isletmeSemasi = new mongoose.Schema({
     fotograf: { type: String, default: '' },
     aktif: { type: Boolean, default: true },
     telefon: { type: String, default: '' },
+    maas: { type: Number, default: 0 },
     kullaniciAdi: { type: String, default: '' },
     sifre: { type: String, default: '' },
     calismaGunleri: { type: [String], default: ['Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'] },
@@ -59,6 +60,11 @@ const isletmeSemasi = new mongoose.Schema({
       saatler: { type: [String], default: [] },
       aciklama: { type: String, default: '' }
     }]
+  }],
+  giderler: [{
+    ad: { type: String, required: true },
+    tutar: { type: Number, required: true },
+    eklenmeTarihi: { type: Date, default: Date.now }
   }],
   premium: {
     aktif: { type: Boolean, default: false },

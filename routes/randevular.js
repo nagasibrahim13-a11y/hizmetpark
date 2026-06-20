@@ -37,6 +37,11 @@ const otomatikTamamla = async () => {
           sadakat.mevcutPuan = 0;
         }
         sadakat.sonGuncelleme = new Date();
+        // VIP kontrolü — toplam ziyaret işletmenin VIP hedefine ulaştıysa müşteriyi VIP işaretle
+        if (sadakat.toplamZiyaret >= (sadakat.odul.vipHedef || 10)) {
+          const Kullanici = require('../models/User');
+          await Kullanici.findByIdAndUpdate(randevu.musteri._id, { vipMi: true, segment: 'vip' });
+        }
         await sadakat.save();
       }
     }
@@ -217,19 +222,38 @@ router.get('/isletme/:isletmeId/analitik', async (req, res) => {
     });
     const populerHizmetler = Object.values(hizmetMap).sort((a, b) => b.sayi - a.sayi).slice(0, 5);
 
-    // Müşteri segmentleri
+    // Müşteri segmentleri (isim listesi + ciro dahil)
     const musteriMap = {};
     tumRandevular.forEach(r => {
       if (!r.musteri) return;
       const id = r.musteri._id.toString();
-      if (!musteriMap[id]) musteriMap[id] = { ad: `${r.musteri.ad} ${r.musteri.soyad}`, sayi: 0 };
+      if (!musteriMap[id]) musteriMap[id] = { ad: `${r.musteri.ad} ${r.musteri.soyad}`, sayi: 0, ciro: 0 };
       musteriMap[id].sayi++;
+      if (r.durum === 'tamamlandi' && !r.hediyeMi) {
+        const tutar = Array.isArray(r.hizmet) ? r.hizmet.reduce((t, h) => t + (h.fiyat || 0), 0) : (r.hizmet?.fiyat || 0);
+        musteriMap[id].ciro += tutar;
+      }
     });
     const musteriler = Object.values(musteriMap);
+
+    const yeniListe = musteriler.filter(m => m.sayi === 1);
+    const duzenliListe = musteriler.filter(m => m.sayi >= 2 && m.sayi <= 4);
+    const vipListe = musteriler.filter(m => m.sayi >= 5);
+    const vipeYakinListe = musteriler.filter(m => m.sayi >= 3 && m.sayi < 5); // 1-2 ziyaret kalan
+
     const segmentler = {
-      yeni: musteriler.filter(m => m.sayi === 1).length,
-      duzenli: musteriler.filter(m => m.sayi >= 2 && m.sayi <= 4).length,
-      vip: musteriler.filter(m => m.sayi >= 5).length
+      yeni: yeniListe.length,
+      duzenli: duzenliListe.length,
+      vip: vipListe.length,
+      yeniListe: yeniListe.sort((a,b) => b.ciro - a.ciro),
+      duzenliListe: duzenliListe.sort((a,b) => b.ciro - a.ciro),
+      vipListe: vipListe.sort((a,b) => b.ciro - a.ciro),
+      vipeYakinListe: vipeYakinListe.sort((a,b) => b.sayi - a.sayi),
+      segmentCiro: {
+        yeni: yeniListe.reduce((t,m) => t + m.ciro, 0),
+        duzenli: duzenliListe.reduce((t,m) => t + m.ciro, 0),
+        vip: vipListe.reduce((t,m) => t + m.ciro, 0)
+      }
     };
 
     res.json({
@@ -255,7 +279,20 @@ router.get('/personel/:personelId', async (req, res) => {
     await otomatikTamamla();
     const { personelId } = req.params;
 
-    const randevular = await Randevu.find({ personel: personelId })
+    const { baslangic, bitis } = req.query;
+
+    const filtre = { personel: personelId };
+    if (baslangic || bitis) {
+      filtre.tarih = {};
+      if (baslangic) filtre.tarih.$gte = new Date(baslangic);
+      if (bitis) {
+        const bitisTarih = new Date(bitis);
+        bitisTarih.setHours(23, 59, 59, 999);
+        filtre.tarih.$lte = bitisTarih;
+      }
+    }
+
+    const randevular = await Randevu.find(filtre)
       .populate('musteri', 'ad soyad')
       .sort({ tarih: -1 });
 
