@@ -6,7 +6,7 @@ const app = express();
 
 // Gelen JSON verilerini okuyabilmek için
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Veritabanına bağlan
 baglan();

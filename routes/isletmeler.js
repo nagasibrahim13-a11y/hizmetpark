@@ -9,19 +9,38 @@ router.get('/yakinimda', async (req, res) => {
     if (!lat || !lng) {
       return res.status(400).json({ hata: 'lat ve lng parametreleri zorunludur' });
     }
-    const filtre = {
-      konum: {
-        $near: {
-          $geometry: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
-          $maxDistance: mesafe ? parseInt(mesafe) : 5000
+
+    const matchFiltre = { 'konum.type': { $exists: true } };
+    if (kategori) matchFiltre.kategori = kategori;
+
+    const isletmeler = await Isletme.aggregate([
+      {
+        $geoNear: {
+          near: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
+          distanceField: 'mesafeMetre',
+          maxDistance: mesafe ? parseInt(mesafe) : 5000,
+          spherical: true,
+          query: matchFiltre
         }
       },
-      'konum.type': { $exists: true }
-    };
-    if (kategori) filtre.kategori = kategori;
-    const isletmeler = await Isletme.find(filtre)
-      .populate('sahip', 'ad soyad')
-      .limit(20);
+      { $limit: 20 },
+      {
+        $lookup: {
+          from: 'kullanicis',
+          localField: 'sahip',
+          foreignField: '_id',
+          as: 'sahipBilgi'
+        }
+      },
+      { $unwind: { path: '$sahipBilgi', preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          sahip: { ad: '$sahipBilgi.ad', soyad: '$sahipBilgi.soyad' }
+        }
+      },
+      { $unset: 'sahipBilgi' }
+    ]);
+
     res.json(isletmeler);
   } catch (hata) {
     res.status(500).json({ hata: hata.message });

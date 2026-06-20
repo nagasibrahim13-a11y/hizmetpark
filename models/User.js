@@ -11,7 +11,9 @@ const kullaniciSemasi = new mongoose.Schema({
   kayitTarihi: { type: Date, default: Date.now },
   vipMi: { type: Boolean, default: false },
   toplamHarcama: { type: Number, default: 0 },
-  segment: { type: String, enum: ['yeni', 'duzenli', 'vip'], default: 'yeni' }
+  segment: { type: String, enum: ['yeni', 'duzenli', 'vip'], default: 'yeni' },
+  favoriler: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Isletme' }],
+  fotograf: { type: String, default: '' }
 });
 
 const Kullanici = mongoose.model('Kullanici', kullaniciSemasi);
