@@ -189,7 +189,8 @@ router.post('/:id/personel', async (req, res) => {
   try {
     const isletme = await Isletme.findById(req.params.id);
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
-    isletme.personel.push(req.body);
+    const { ad, unvan, kullaniciAdi, sifre } = req.body;
+    isletme.personel.push({ ad, unvan: unvan || 'Çalışan', kullaniciAdi: kullaniciAdi || '', sifre: sifre || '' });
     await isletme.save();
     res.status(201).json({ mesaj: 'Personel eklendi', personel: isletme.personel });
   } catch (hata) {
@@ -241,6 +242,37 @@ router.put('/:id/premium/iptal', async (req, res) => {
     );
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
     res.json({ mesaj: 'Premium iptal edildi' });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
+// Personel girişi
+router.post('/personel-giris', async (req, res) => {
+  try {
+    const { kullaniciAdi, sifre } = req.body;
+    if (!kullaniciAdi || !sifre) {
+      return res.status(400).json({ hata: 'Kullanıcı adı ve şifre gerekli' });
+    }
+
+    const isletme = await Isletme.findOne({ 'personel.kullaniciAdi': kullaniciAdi });
+    if (!isletme) {
+      return res.status(401).json({ hata: 'Kullanıcı adı veya şifre hatalı' });
+    }
+
+    const personel = isletme.personel.find(p => p.kullaniciAdi === kullaniciAdi);
+    if (!personel || personel.sifre !== sifre) {
+      return res.status(401).json({ hata: 'Kullanıcı adı veya şifre hatalı' });
+    }
+
+    res.json({
+      personelId: personel._id,
+      ad: personel.ad,
+      unvan: personel.unvan,
+      isletmeId: isletme._id,
+      isletmeAdi: isletme.isletmeAdi,
+      rol: 'personel'
+    });
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
   }

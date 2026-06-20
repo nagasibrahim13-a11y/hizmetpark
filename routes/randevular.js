@@ -212,6 +212,38 @@ router.get('/isletme/:isletmeId/analitik', async (req, res) => {
   }
 });
 
+// Personelin randevularını getir
+router.get('/personel/:personelId', async (req, res) => {
+  try {
+    await otomatikTamamla();
+    const { personelId } = req.params;
+
+    const randevular = await Randevu.find({ personel: personelId })
+      .populate('musteri', 'ad soyad')
+      .sort({ tarih: -1 });
+
+    const toplamCiro = randevular
+      .filter(r => r.durum === 'tamamlandi' && !r.hediyeMi)
+      .reduce((t, r) => {
+        const tutar = Array.isArray(r.hizmet) ? r.hizmet.reduce((s, h) => s + (h.fiyat || 0), 0) : (r.hizmet?.fiyat || 0);
+        return t + tutar;
+      }, 0);
+
+    res.json({
+      randevular,
+      ozet: {
+        toplamRandevu: randevular.length,
+        tamamlanan: randevular.filter(r => r.durum === 'tamamlandi').length,
+        onaylanan: randevular.filter(r => r.durum === 'onaylandi').length,
+        iptal: randevular.filter(r => r.durum === 'iptal').length,
+        toplamCiro
+      }
+    });
+  } catch (hata) {
+    res.status(500).json({ hata: hata.message });
+  }
+});
+
 // İşletmenin randevularını getir
 router.get('/isletme/:isletmeId', async (req, res) => {
   try {

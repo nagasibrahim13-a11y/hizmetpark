@@ -47,7 +47,9 @@ const isletmeSemasi = new mongoose.Schema({
     ad: { type: String, required: true },
     unvan: { type: String, default: 'Çalışan' },
     fotograf: { type: String, default: '' },
-    aktif: { type: Boolean, default: true }
+    aktif: { type: Boolean, default: true },
+    kullaniciAdi: { type: String, default: '' },
+    sifre: { type: String, default: '' }
   }],
   premium: {
     aktif: { type: Boolean, default: false },
