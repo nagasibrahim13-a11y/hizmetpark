@@ -19,6 +19,7 @@ app.use('/api/randevular', require('./routes/randevular'));
 app.use('/api/yorumlar', require('./routes/yorumlar'));
 app.use('/api/sadakat', require('./routes/sadakat'));
 app.use('/api/reklamlar', require('./routes/reklamlar'));
+app.use('/api/bildirimler', require('./routes/bildirimler'));
 
 
 // Test endpoint'i

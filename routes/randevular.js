@@ -3,6 +3,7 @@ const router = express.Router();
 const Randevu = require('../models/Randevu');
 const Sadakat = require('../models/Sadakat');
 const Isletme = require('../models/Isletme');
+const Bildirim = require('../models/Bildirim');
 
 // Saati geçmiş onaylanan randevuları otomatik tamamla + sadakat puanı ekle
 const otomatikTamamla = async () => {
@@ -34,6 +35,13 @@ const otomatikTamamla = async () => {
         sadakat.toplamZiyaret += 1;
         if (sadakat.mevcutPuan >= sadakat.odul.hedefZiyaret) {
           sadakat.kazanilanOduller.push({ tarih: new Date(), hediye: sadakat.odul.hediye, kullanildi: false });
+          await Bildirim.create({
+            aliciTipi: 'musteri',
+            aliciId: randevu.musteri._id,
+            baslik: 'Tebrikler, Ödül Kazandınız!',
+            mesaj: `${sadakat.odul.hediye} hediyesini kazandınız. Sadakat sayfanızdan kullanabilirsiniz.`,
+            tip: 'sadakat'
+          });
           sadakat.mevcutPuan = 0;
         }
         sadakat.sonGuncelleme = new Date();
@@ -141,6 +149,22 @@ router.post('/', async (req, res) => {
     }
 
     const yeniRandevu = await Randevu.create({ ...req.body, durum: 'onaylandi' });
+    await Bildirim.create({
+      aliciTipi: 'isletme',
+      aliciId: yeniRandevu.isletme,
+      baslik: 'Yeni Randevu',
+      mesaj: `${yeniRandevu.saat} saatine yeni bir randevu alındı.`,
+      tip: 'randevu'
+    });
+    if (yeniRandevu.personel) {
+      await Bildirim.create({
+        aliciTipi: 'personel',
+        aliciId: yeniRandevu.personel,
+        baslik: 'Yeni Randevu',
+        mesaj: `${yeniRandevu.saat} saatine size yeni bir randevu atandı.`,
+        tip: 'randevu'
+      });
+    }
     res.status(201).json(yeniRandevu);
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
@@ -355,6 +379,22 @@ router.put('/:id/iptal', async (req, res) => {
     }
     randevu.durum = 'iptal';
     await randevu.save();
+    if (randevu.musteri) {
+      await Bildirim.create({
+        aliciTipi: 'musteri',
+        aliciId: randevu.musteri,
+        baslik: 'Randevu İptal Edildi',
+        mesaj: `${new Date(randevu.tarih).toLocaleDateString('tr-TR')} ${randevu.saat} randevunuz iptal edildi.`,
+        tip: 'iptal'
+      });
+    }
+    await Bildirim.create({
+      aliciTipi: 'isletme',
+      aliciId: randevu.isletme,
+      baslik: 'Randevu İptal Edildi',
+      mesaj: `${new Date(randevu.tarih).toLocaleDateString('tr-TR')} ${randevu.saat} randevu iptal edildi.`,
+      tip: 'iptal'
+    });
     res.json({ mesaj: 'Randevu iptal edildi', randevu });
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
