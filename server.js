@@ -1,6 +1,16 @@
 const express = require('express');
 const cors = require('cors');
-const baglan = require('./db');
+const baglan = require('./db'); // dotenv burada yükleniyor
+
+if (!process.env.JWT_SECRET) {
+  console.error('');
+  console.error('╔══════════════════════════════════════════════════════════╗');
+  console.error('║  KRITIK HATA: JWT_SECRET ortam degiskeni tanimli degil.  ║');
+  console.error('║  .env dosyasini kontrol et. Sunucu baslatilmiyor.        ║');
+  console.error('╚══════════════════════════════════════════════════════════╝');
+  console.error('');
+  process.exit(1);
+}
 
 const app = express();
 

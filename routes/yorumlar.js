@@ -3,17 +3,22 @@ const router = express.Router();
 const Yorum = require('../models/Yorum');
 const Isletme = require('../models/Isletme');
 const Randevu = require('../models/Randevu');
+const { dogrulaToken } = require('../middleware/auth');
 
-// Yorum ekle
-router.post('/', async (req, res) => {
+// Yorum ekle — sadece giriş yapmış müşteriler; sahip token'dan alınır
+router.post('/', dogrulaToken, async (req, res) => {
   try {
-    const { musteri, isletme, randevu, puan, yorum } = req.body;
+    const { isletme, randevu, puan, yorum } = req.body;
+    const musteriId = req.kullanici.id;
 
-    // Randevu tamamlandı mı kontrol et
+    // Randevu tamamlandı mı ve bu kullanıcıya mı ait?
     if (randevu) {
       const randevuKontrol = await Randevu.findById(randevu);
       if (!randevuKontrol || randevuKontrol.durum !== 'tamamlandi') {
         return res.status(400).json({ hata: 'Sadece tamamlanan randevular için yorum yapılabilir' });
+      }
+      if (randevuKontrol.musteri.toString() !== musteriId) {
+        return res.status(403).json({ hata: 'Bu randevu size ait değil' });
       }
       // Aynı randevuya iki yorum yazılmasın
       const mevcutYorum = await Yorum.findOne({ randevu });
@@ -22,7 +27,7 @@ router.post('/', async (req, res) => {
       }
     }
 
-    const yeniYorum = await Yorum.create({ musteri, isletme, randevu, puan, yorum });
+    const yeniYorum = await Yorum.create({ musteri: musteriId, isletme, randevu, puan, yorum });
 
     // İşletmenin ortalama puanını güncelle
     const tumYorumlar = await Yorum.find({ isletme });

@@ -2,10 +2,14 @@ const express = require('express');
 const router = express.Router();
 const Sadakat = require('../models/Sadakat');
 const Isletme = require('../models/Isletme');
+const { dogrulaToken, isletmeSahibiOl } = require('../middleware/auth');
 
-// Müşterinin tüm sadakat kartlarını getir
-router.get('/musteri/:musteriId', async (req, res) => {
+// Müşterinin tüm sadakat kartlarını getir — sadece kendi kartları
+router.get('/musteri/:musteriId', dogrulaToken, async (req, res) => {
   try {
+    if (req.kullanici.id !== req.params.musteriId) {
+      return res.status(403).json({ hata: 'Bu bilgilere erişim yetkiniz yok' });
+    }
     const sadakatlar = await Sadakat.find({ musteri: req.params.musteriId })
       .populate('isletme', 'isletmeAdi kategori adres');
     res.json(sadakatlar);
@@ -14,8 +18,8 @@ router.get('/musteri/:musteriId', async (req, res) => {
   }
 });
 
-// İşletmenin sadakat ayarlarını güncelle
-router.put('/isletme/:isletmeId', async (req, res) => {
+// İşletmenin sadakat ayarlarını güncelle — sadece işletme sahibi
+router.put('/isletme/:id', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
     const { hedefZiyaret, hediye, vipHedef, vipHediye } = req.body;
 
@@ -25,7 +29,7 @@ router.put('/isletme/:isletmeId', async (req, res) => {
 
     // Bu işletmedeki tüm sadakat kartlarını güncelle
     await Sadakat.updateMany(
-      { isletme: req.params.isletmeId },
+      { isletme: req.params.id },
       guncelleme
     );
 

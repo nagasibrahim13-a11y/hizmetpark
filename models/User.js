@@ -5,7 +5,7 @@ const kullaniciSemasi = new mongoose.Schema({
   soyad: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   telefon: { type: String },
-  sifre: { type: String },
+  sifre: { type: String, minlength: [6, 'Şifre en az 6 karakter olmalıdır'] },
   googleId: { type: String },
   rol: { type: String, enum: ['musteri', 'isletme'], default: 'musteri' },
   kayitTarihi: { type: Date, default: Date.now },

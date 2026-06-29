@@ -1,24 +1,31 @@
 const express = require('express');
 const router = express.Router();
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const Kullanici = require('../models/User');
+const { dogrulaToken } = require('../middleware/auth');
+
+const tokenOlustur = (kullanici) =>
+  jwt.sign({ id: kullanici._id, rol: kullanici.rol }, process.env.JWT_SECRET, { expiresIn: '30d' });
 
 // Kayıt ol
 router.post('/kayit', async (req, res) => {
   try {
-    const { ad, soyad, email, sifre, telefon, rol } = req.body;
+    const { ad, soyad, email, sifre, telefon } = req.body;
 
-    // Aynı email var mı?
     const mevcutKullanici = await Kullanici.findOne({ email });
     if (mevcutKullanici) {
       return res.status(400).json({ hata: 'Bu email zaten kayıtlı' });
     }
 
-    const kullanici = await Kullanici.create({
-      ad, soyad, email, sifre, telefon, rol
-    });
+    const sifreHash = sifre ? await bcrypt.hash(sifre, 10) : undefined;
+
+    // rol body'den alınmıyor — schema default'u olan 'musteri' atanır
+    const kullanici = await Kullanici.create({ ad, soyad, email, sifre: sifreHash, telefon });
 
     res.status(201).json({
       mesaj: 'Kayıt başarılı',
+      token: tokenOlustur(kullanici),
       kullanici: {
         id: kullanici._id,
         ad: kullanici.ad,
@@ -26,7 +33,6 @@ router.post('/kayit', async (req, res) => {
         rol: kullanici.rol
       }
     });
-
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
   }
@@ -37,13 +43,19 @@ router.post('/giris', async (req, res) => {
   try {
     const { email, sifre } = req.body;
 
-    const kullanici = await Kullanici.findOne({ email, sifre });
-    if (!kullanici) {
+    const kullanici = await Kullanici.findOne({ email });
+    if (!kullanici || !kullanici.sifre) {
+      return res.status(400).json({ hata: 'Email veya şifre hatalı' });
+    }
+
+    const eslesti = await bcrypt.compare(sifre, kullanici.sifre);
+    if (!eslesti) {
       return res.status(400).json({ hata: 'Email veya şifre hatalı' });
     }
 
     res.json({
       mesaj: 'Giriş başarılı',
+      token: tokenOlustur(kullanici),
       kullanici: {
         id: kullanici._id,
         ad: kullanici.ad,
@@ -51,7 +63,6 @@ router.post('/giris', async (req, res) => {
         rol: kullanici.rol
       }
     });
-
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
   }
@@ -67,9 +78,13 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Profil güncelle
-router.put('/:id', async (req, res) => {
+// Profil güncelle — sadece kendi hesabı
+router.put('/:id', dogrulaToken, async (req, res) => {
   try {
+    if (req.kullanici.id !== req.params.id) {
+      return res.status(403).json({ hata: 'Başka bir kullanıcının profilini güncelleyemezsiniz' });
+    }
+
     const { ad, soyad, telefon, fotograf } = req.body;
     const guncelleme = {};
     if (ad !== undefined) guncelleme.ad = ad;

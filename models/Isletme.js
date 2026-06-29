@@ -51,7 +51,14 @@ const isletmeSemasi = new mongoose.Schema({
     telefon: { type: String, default: '' },
     maas: { type: Number, default: 0 },
     kullaniciAdi: { type: String, default: '' },
-    sifre: { type: String, default: '' },
+    sifre: {
+      type: String,
+      default: '',
+      validate: {
+        validator: (v) => !v || v.length >= 6,
+        message: 'Personel şifresi en az 6 karakter olmalıdır'
+      }
+    },
     calismaGunleri: { type: [String], default: ['Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'] },
     yetkiliHizmetler: [{ type: String }],
     izinTarihleri: [{
@@ -70,7 +77,7 @@ const isletmeSemasi = new mongoose.Schema({
     aktif: { type: Boolean, default: false },
     baslangic: { type: Date, default: null },
     bitis: { type: Date, default: null },
-    paket: { type: String, enum: ['aylik', 'yillik'], default: null }
+    paket: { type: String, enum: ['deneme', 'aylik', 'yillik'], default: null }
   }
 });
 

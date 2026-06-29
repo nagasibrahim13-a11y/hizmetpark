@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const Isletme = require('../models/Isletme');
+const { dogrulaToken, isletmeSahibiOl, planKontrol } = require('../middleware/auth');
 
 // Yakındaki işletmeleri listele
 router.get('/yakinimda', async (req, res) => {
@@ -72,22 +75,79 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Yeni işletme oluştur
-router.post('/', async (req, res) => {
+// Yeni işletme oluştur — sadece giriş yapmış kullanıcılar; sahip token'dan alınır
+router.post('/', dogrulaToken, async (req, res) => {
   try {
-    const isletme = await Isletme.create(req.body);
-    res.status(201).json({ mesaj: 'İşletme oluşturuldu', isletme });
+    const Kullanici = require('../models/User');
+
+    // İlk 10 işletme 90 gün deneme, sonrakiler 7 gün
+    const mevcutSayi = await Isletme.countDocuments();
+    const denemeGun = mevcutSayi < 10 ? 90 : 7;
+    const denemeBitis = new Date();
+    denemeBitis.setDate(denemeBitis.getDate() + denemeGun);
+
+    const isletme = await Isletme.create({
+      ...req.body,
+      sahip: req.kullanici.id,
+      premium: {
+        aktif: true,
+        baslangic: new Date(),
+        bitis: denemeBitis,
+        paket: 'deneme',
+      },
+    });
+
+    // İşletme yaratmak kullanıcıyı otomatik 'isletme' rolüne yükseltir
+    const kullanici = await Kullanici.findByIdAndUpdate(
+      req.kullanici.id,
+      { rol: 'isletme' },
+      { new: true }
+    );
+    // Güncel rol içeren yeni token döndür (kayıt akışında otomatik giriş için)
+    const yeniToken = jwt.sign(
+      { id: kullanici._id, rol: kullanici.rol },
+      process.env.JWT_SECRET,
+      { expiresIn: '30d' }
+    );
+    res.status(201).json({
+      mesaj: 'İşletme oluşturuldu',
+      isletme,
+      token: yeniToken,
+      kullanici: { id: kullanici._id, ad: kullanici.ad, email: kullanici.email, rol: kullanici.rol },
+    });
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
   }
 });
 
-// İşletme güncelle
-router.put('/:id', async (req, res) => {
+// İşletme güncelle — sadece sahip
+// Whitelist: premium, sahip, ortalamaPuan, yorumSayisi gibi sistem alanları body'den alınamaz
+router.put('/:id', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
+    const {
+      isletmeAdi, kategori, slogan, hakkinda, fotograf,
+      adres, konum, telefon,
+      calismaGunleri, calismaBaslangic, calismaBitis,
+      aktif,
+    } = req.body;
+
+    const guncelleme = {};
+    if (isletmeAdi   !== undefined) guncelleme.isletmeAdi        = isletmeAdi;
+    if (kategori     !== undefined) guncelleme.kategori          = kategori;
+    if (slogan       !== undefined) guncelleme.slogan            = slogan;
+    if (hakkinda     !== undefined) guncelleme.hakkinda          = hakkinda;
+    if (fotograf     !== undefined) guncelleme.fotograf          = fotograf;
+    if (adres        !== undefined) guncelleme.adres             = adres;
+    if (konum        !== undefined) guncelleme.konum             = konum;
+    if (telefon      !== undefined) guncelleme.telefon           = telefon;
+    if (calismaGunleri  !== undefined) guncelleme.calismaGunleri  = calismaGunleri;
+    if (calismaBaslangic !== undefined) guncelleme.calismaBaslangic = calismaBaslangic;
+    if (calismaBitis !== undefined) guncelleme.calismaBitis      = calismaBitis;
+    if (aktif        !== undefined) guncelleme.aktif             = aktif;
+
     const isletme = await Isletme.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      guncelleme,
       { new: true }
     );
     res.json({ mesaj: 'İşletme güncellendi', isletme });
@@ -96,8 +156,8 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// Hizmet ekle
-router.post('/:id/hizmet', async (req, res) => {
+// Hizmet ekle — sadece sahip
+router.post('/:id/hizmet', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
     const isletme = await Isletme.findById(req.params.id);
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
@@ -109,8 +169,8 @@ router.post('/:id/hizmet', async (req, res) => {
   }
 });
 
-// Hizmet güncelle
-router.put('/:id/hizmet/:hizmetId', async (req, res) => {
+// Hizmet güncelle — sadece sahip
+router.put('/:id/hizmet/:hizmetId', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
     const isletme = await Isletme.findById(req.params.id);
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
@@ -126,8 +186,8 @@ router.put('/:id/hizmet/:hizmetId', async (req, res) => {
   }
 });
 
-// Hizmet sil
-router.delete('/:id/hizmet/:hizmetId', async (req, res) => {
+// Hizmet sil — sadece sahip
+router.delete('/:id/hizmet/:hizmetId', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
     const isletme = await Isletme.findById(req.params.id);
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
@@ -141,25 +201,21 @@ router.delete('/:id/hizmet/:hizmetId', async (req, res) => {
   }
 });
 
-// Kapalı tarih ekle
-router.put('/:id/kapali-tarih', async (req, res) => {
+// Kapalı tarih ekle — sadece sahip
+router.put('/:id/kapali-tarih', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
     const isletme = await Isletme.findById(req.params.id);
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
     isletme.kapaliTarihler.push(req.body);
     await isletme.save();
-    console.log('[KAPALI TARIH EKLENDI] isletmeId:', req.params.id,
-      '| tarih:', req.body.tarih,
-      '| tumGun:', req.body.tumGun,
-      '| DB kaydi:', isletme.kapaliTarihler[isletme.kapaliTarihler.length - 1]);
     res.json({ mesaj: 'Kapalı tarih eklendi', isletme });
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
   }
 });
 
-// Kapalı tarih kaldır
-router.delete('/:id/kapali-tarih/:tarihId', async (req, res) => {
+// Kapalı tarih kaldır — sadece sahip
+router.delete('/:id/kapali-tarih/:tarihId', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
     const isletme = await Isletme.findById(req.params.id);
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
@@ -184,19 +240,20 @@ router.get('/:id/personel', async (req, res) => {
   }
 });
 
-// Personel ekle
-router.post('/:id/personel', async (req, res) => {
+// Personel ekle — sadece sahip; ücretsiz planda max 1 personel
+router.post('/:id/personel', dogrulaToken, isletmeSahibiOl, planKontrol('personelEkle'), async (req, res) => {
   try {
     const isletme = await Isletme.findById(req.params.id);
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
     const { ad, unvan, telefon, maas, kullaniciAdi, sifre, calismaGunleri, yetkiliHizmetler } = req.body;
+    const sifreHash = sifre ? await bcrypt.hash(sifre, 10) : '';
     isletme.personel.push({
       ad,
       unvan: unvan || 'Çalışan',
       telefon: telefon || '',
       maas: maas || 0,
       kullaniciAdi: kullaniciAdi || '',
-      sifre: sifre || '',
+      sifre: sifreHash,
       calismaGunleri: calismaGunleri && calismaGunleri.length > 0 ? calismaGunleri : ['Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'],
       yetkiliHizmetler: yetkiliHizmetler || []
     });
@@ -207,8 +264,8 @@ router.post('/:id/personel', async (req, res) => {
   }
 });
 
-// Personel sil
-router.delete('/:id/personel/:personelId', async (req, res) => {
+// Personel sil — sadece sahip
+router.delete('/:id/personel/:personelId', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
     const isletme = await Isletme.findById(req.params.id);
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
@@ -222,8 +279,8 @@ router.delete('/:id/personel/:personelId', async (req, res) => {
   }
 });
 
-// Premium aktif et (admin kullanır)
-router.put('/:id/premium', async (req, res) => {
+// Premium aktif et — sadece sahip
+router.put('/:id/premium', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
     const { paket } = req.body; // 'aylik' veya 'yillik'
     const sure = paket === 'yillik' ? 365 : 30;
@@ -241,8 +298,8 @@ router.put('/:id/premium', async (req, res) => {
   }
 });
 
-// Premium iptal et
-router.put('/:id/premium/iptal', async (req, res) => {
+// Premium iptal et — sadece sahip
+router.put('/:id/premium/iptal', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
     const isletme = await Isletme.findByIdAndUpdate(
       req.params.id,
@@ -256,8 +313,8 @@ router.put('/:id/premium/iptal', async (req, res) => {
   }
 });
 
-// Personel güncelle
-router.put('/:id/personel/:personelId', async (req, res) => {
+// Personel güncelle — sadece sahip
+router.put('/:id/personel/:personelId', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
     const { ad, unvan, telefon, maas, kullaniciAdi, sifre, calismaGunleri, yetkiliHizmetler } = req.body;
     const isletme = await Isletme.findById(req.params.id);
@@ -271,7 +328,7 @@ router.put('/:id/personel/:personelId', async (req, res) => {
     if (telefon !== undefined) personel.telefon = telefon;
     if (maas !== undefined) personel.maas = maas;
     if (kullaniciAdi !== undefined) personel.kullaniciAdi = kullaniciAdi;
-    if (sifre) personel.sifre = sifre;
+    if (sifre) personel.sifre = await bcrypt.hash(sifre, 10);
     if (calismaGunleri !== undefined) personel.calismaGunleri = calismaGunleri;
     if (yetkiliHizmetler !== undefined) personel.yetkiliHizmetler = yetkiliHizmetler;
 
@@ -282,8 +339,8 @@ router.put('/:id/personel/:personelId', async (req, res) => {
   }
 });
 
-// Gider ekle
-router.post('/:id/gider', async (req, res) => {
+// Gider ekle — sadece sahip
+router.post('/:id/gider', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
     const { ad, tutar } = req.body;
     if (!ad || tutar == null) return res.status(400).json({ hata: 'Gider adı ve tutar gerekli' });
@@ -297,8 +354,8 @@ router.post('/:id/gider', async (req, res) => {
   }
 });
 
-// Gider sil
-router.delete('/:id/gider/:giderId', async (req, res) => {
+// Gider sil — sadece sahip
+router.delete('/:id/gider/:giderId', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
     const isletme = await Isletme.findById(req.params.id);
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
@@ -346,8 +403,8 @@ router.get('/:id/net-kar', async (req, res) => {
   }
 });
 
-// Personele izin tarihi ekle
-router.post('/:id/personel/:personelId/izin', async (req, res) => {
+// Personele izin tarihi ekle — sadece sahip
+router.post('/:id/personel/:personelId/izin', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
     const { tarih, tumGun, saatler, aciklama } = req.body;
     const isletme = await Isletme.findById(req.params.id);
@@ -364,8 +421,8 @@ router.post('/:id/personel/:personelId/izin', async (req, res) => {
   }
 });
 
-// Personel izin tarihi sil
-router.delete('/:id/personel/:personelId/izin/:izinId', async (req, res) => {
+// Personel izin tarihi sil — sadece sahip
+router.delete('/:id/personel/:personelId/izin/:izinId', dogrulaToken, isletmeSahibiOl, async (req, res) => {
   try {
     const isletme = await Isletme.findById(req.params.id);
     if (!isletme) return res.status(404).json({ hata: 'İşletme bulunamadı' });
@@ -395,7 +452,8 @@ router.post('/personel-giris', async (req, res) => {
     }
 
     const personel = isletme.personel.find(p => p.kullaniciAdi === kullaniciAdi);
-    if (!personel || personel.sifre !== sifre) {
+    const sifreEslesti = personel?.sifre ? await bcrypt.compare(sifre, personel.sifre) : false;
+    if (!personel || !sifreEslesti) {
       return res.status(401).json({ hata: 'Kullanıcı adı veya şifre hatalı' });
     }
 

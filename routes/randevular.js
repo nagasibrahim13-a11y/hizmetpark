@@ -4,6 +4,7 @@ const Randevu = require('../models/Randevu');
 const Sadakat = require('../models/Sadakat');
 const Isletme = require('../models/Isletme');
 const Bildirim = require('../models/Bildirim');
+const { dogrulaToken } = require('../middleware/auth');
 
 // Saati geçmiş onaylanan randevuları otomatik tamamla + sadakat puanı ekle
 const otomatikTamamla = async () => {
@@ -59,102 +60,133 @@ const otomatikTamamla = async () => {
 };
 
 // Randevu oluştur
-router.post('/', async (req, res) => {
+router.post('/', dogrulaToken, async (req, res) => {
   try {
     const { hediyeMi, sadakatId, isletme: isletmeId, tarih, saat } = req.body;
+    let personelId = req.body.personel;
 
-    // Kapalı tarih kontrolü
-    if (isletmeId && tarih) {
-      const isletmeDoc = await Isletme.findById(isletmeId);
+    // 'fark_etmez', boş string, null, undefined → otomatik personel ata akışı
+    const farkEtmez = !personelId || personelId === 'fark_etmez';
+
+    // ── 1. İşletmeyi tek seferde çek ─────────────────────────────────────
+    if (!isletmeId) return res.status(400).json({ hata: 'İşletme bilgisi eksik' });
+    const isletmeDoc = await Isletme.findById(isletmeId);
+    if (!isletmeDoc) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+
+    // ── 2. Kapalı tarih kontrolü ─────────────────────────────────────────
+    if (tarih && isletmeDoc.kapaliTarihler?.length > 0) {
       const tarihStr = new Date(tarih).toISOString().split('T')[0];
-      console.log('[RANDEVU KONTROL] isletmeId:', isletmeId,
-        '| istenen tarih:', tarihStr,
-        '| saat:', saat,
-        '| kapaliTarihSayisi:', isletmeDoc?.kapaliTarihler?.length ?? 'isletme bulunamadi');
-      if (isletmeDoc && isletmeDoc.kapaliTarihler?.length > 0) {
-        const kapali = isletmeDoc.kapaliTarihler.find(kt => {
-          const ktStr = new Date(kt.tarih).toISOString().split('T')[0];
-          const eslesti = ktStr === tarihStr && (kt.tumGun || kt.saatler?.includes(saat));
-          if (eslesti) console.log('[RANDEVU KONTROL] KAPALI ESLESTI:', { ktStr, tumGun: kt.tumGun, saatler: kt.saatler });
-          return eslesti;
-        });
-        if (kapali) {
-          return res.status(400).json({ hata: 'Bu tarih ve saatte işletme kapalıdır.' });
-        }
+      const kapali = isletmeDoc.kapaliTarihler.find(kt => {
+        const ktStr = new Date(kt.tarih).toISOString().split('T')[0];
+        return ktStr === tarihStr && (kt.tumGun || kt.saatler?.includes(saat));
+      });
+      if (kapali) {
+        return res.status(400).json({ hata: 'Bu tarih ve saatte işletme kapalıdır.' });
       }
     }
 
-    // Hediye randevu ise sadakat kartını kontrol et
-    if (hediyeMi && sadakatId) {
+    // ── 3. Hediye randevu kontrolü ───────────────────────────────────────
+    if (hediyeMi) {
+      if (!sadakatId) {
+        return res.status(400).json({ hata: 'Yetersiz sadakat puanı veya geçersiz kart' });
+      }
       const sadakat = await Sadakat.findById(sadakatId);
-      if (!sadakat) return res.status(400).json({ hata: 'Sadakat kartı bulunamadı' });
-
+      if (
+        !sadakat ||
+        sadakat.musteri.toString() !== req.kullanici.id ||
+        sadakat.isletme.toString() !== isletmeId
+      ) {
+        return res.status(400).json({ hata: 'Yetersiz sadakat puanı veya geçersiz kart' });
+      }
       const bekleyenOdul = sadakat.kazanilanOduller.find(o => !o.kullanildi);
-      if (!bekleyenOdul) return res.status(400).json({ hata: 'Kullanılabilir ödül yok' });
-
-      // Ödülü kullanıldı olarak işaretle
+      if (!bekleyenOdul) {
+        return res.status(400).json({ hata: 'Yetersiz sadakat puanı veya geçersiz kart' });
+      }
       bekleyenOdul.kullanildi = true;
       await sadakat.save();
     }
 
-    // Personel müsaitlik kontrolü
-    const { personel: personelId } = req.body;
-    if (personelId && isletmeId && tarih) {
-      const isletmeDoc2 = await Isletme.findById(isletmeId);
-      const personelDoc = isletmeDoc2?.personel?.find(p => p._id.toString() === personelId);
+    // ── 4. Bu slot için dolu personel setini tek DB sorgusunda çek ───────
+    // Tüm personel kontrollerinde bu set kullanılır — ekstra DB sorgusu yok
+    const tarihObj = new Date(tarih);
+    const gunler = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+    const gunAdi = gunler[tarihObj.getDay()];
+    const tarihStr = tarihObj.toISOString().split('T')[0];
 
-      if (personelDoc) {
-        const tarihObj = new Date(tarih);
-        const gunler = ['Pazar','Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'];
-        const gunAdi = gunler[tarihObj.getDay()];
+    const doluPersonelIds = await Randevu.distinct('personel', {
+      isletme: isletmeId,
+      tarih,
+      saat,
+      durum: { $in: ['bekliyor', 'onaylandi'] },
+    });
+    const doluSet = new Set(doluPersonelIds.map(id => id?.toString()).filter(Boolean));
 
-        // Çalışma günü kontrolü
-        if (!personelDoc.calismaGunleri.includes(gunAdi)) {
-          return res.status(400).json({ hata: `${personelDoc.ad} bu gün çalışmıyor.` });
+    // ── 5a. Belirli personel seçildi: doğrula + çakışma kontrolü ─────────
+    if (!farkEtmez) {
+      const personelDoc = isletmeDoc.personel.find(p => p._id.toString() === personelId);
+      if (!personelDoc) return res.status(404).json({ hata: 'Personel bulunamadı' });
+
+      if (!personelDoc.calismaGunleri.includes(gunAdi)) {
+        return res.status(400).json({ hata: `${personelDoc.ad} bu gün çalışmıyor.` });
+      }
+      const izinli = personelDoc.izinTarihleri?.find(izin => {
+        const izinStr = new Date(izin.tarih).toISOString().split('T')[0];
+        return izinStr === tarihStr && (izin.tumGun || izin.saatler?.includes(saat));
+      });
+      if (izinli) {
+        return res.status(400).json({ hata: `${personelDoc.ad} bu tarihte izinli.` });
+      }
+      if (personelDoc.yetkiliHizmetler?.length > 0) {
+        const istenenHizmetler = Array.isArray(req.body.hizmet)
+          ? req.body.hizmet.map(h => h.ad)
+          : [req.body.hizmet?.ad];
+        const yetkisizHizmet = istenenHizmetler.find(h => h && !personelDoc.yetkiliHizmetler.includes(h));
+        if (yetkisizHizmet) {
+          return res.status(400).json({ hata: `${personelDoc.ad} "${yetkisizHizmet}" hizmetini veremiyor.` });
         }
+      }
+      // Personel bazlı çakışma: sadece bu personelin slotunu kontrol et
+      if (doluSet.has(personelId)) {
+        return res.status(409).json({ hata: 'Bu saat dolu, lütfen başka bir saat seçin' });
+      }
 
-        // İzin tarihi kontrolü
-        const tarihStr = tarihObj.toISOString().split('T')[0];
-        const izinli = personelDoc.izinTarihleri?.find(izin => {
+    // ── 5b. Fark Etmez: ilk uygun aktif personeli otomatik ata ───────────
+    } else {
+      const aktifPersonel = isletmeDoc.personel.filter(p => p.aktif !== false);
+      let secilenPersonel = null;
+
+      for (const p of aktifPersonel) {
+        if (!p.calismaGunleri.includes(gunAdi)) continue;
+        const izinli = p.izinTarihleri?.find(izin => {
           const izinStr = new Date(izin.tarih).toISOString().split('T')[0];
           return izinStr === tarihStr && (izin.tumGun || izin.saatler?.includes(saat));
         });
-        if (izinli) {
-          return res.status(400).json({ hata: `${personelDoc.ad} bu tarihte izinli.` });
-        }
-
-        // Hizmet yetkisi kontrolü
-        if (personelDoc.yetkiliHizmetler && personelDoc.yetkiliHizmetler.length > 0) {
-          const istenenHizmetler = Array.isArray(req.body.hizmet) ? req.body.hizmet.map(h => h.ad) : [req.body.hizmet?.ad];
-          const yetkisizHizmet = istenenHizmetler.find(h => !personelDoc.yetkiliHizmetler.includes(h));
-          if (yetkisizHizmet) {
-            return res.status(400).json({ hata: `${personelDoc.ad} "${yetkisizHizmet}" hizmetini veremiyor.` });
-          }
-        }
+        if (izinli) continue;
+        if (doluSet.has(p._id.toString())) continue;
+        secilenPersonel = p;
+        break;
       }
+
+      if (!secilenPersonel) {
+        return res.status(400).json({ hata: 'Bu saatte uygun personel bulunmamaktadır' });
+      }
+      personelId = secilenPersonel._id.toString();
     }
 
-    // Çakışma kontrolü
-    const { isletme: isletmeId2, tarih: tarih2, saat: saat2, personel } = req.body;
-    const cakismaFiltre = {
-      isletme: isletmeId2,
-      tarih: tarih2,
-      saat: saat2,
-      durum: { $in: ['bekliyor', 'onaylandi'] }
-    };
-    if (personel) cakismaFiltre.personel = personel;
-    const cakisan = await Randevu.findOne(cakismaFiltre);
-    if (cakisan) {
-      return res.status(409).json({ hata: 'Bu saat dolu, lütfen başka bir saat seçin' });
-    }
+    // ── 6. Randevuyu kaydet ───────────────────────────────────────────────
+    const yeniRandevu = await Randevu.create({
+      ...req.body,
+      musteri: req.kullanici.id,
+      personel: personelId,
+      durum: 'onaylandi',
+    });
 
-    const yeniRandevu = await Randevu.create({ ...req.body, durum: 'onaylandi' });
     await Bildirim.create({
       aliciTipi: 'isletme',
       aliciId: yeniRandevu.isletme,
       baslik: 'Yeni Randevu',
       mesaj: `${yeniRandevu.saat} saatine yeni bir randevu alındı.`,
-      tip: 'randevu'
+      tip: 'randevu',
     });
     if (yeniRandevu.personel) {
       await Bildirim.create({
@@ -162,9 +194,10 @@ router.post('/', async (req, res) => {
         aliciId: yeniRandevu.personel,
         baslik: 'Yeni Randevu',
         mesaj: `${yeniRandevu.saat} saatine size yeni bir randevu atandı.`,
-        tip: 'randevu'
+        tip: 'randevu',
       });
     }
+
     res.status(201).json(yeniRandevu);
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
@@ -204,6 +237,15 @@ router.get('/isletme/:isletmeId/doluluk', async (req, res) => {
 router.get('/isletme/:isletmeId/analitik', async (req, res) => {
   try {
     const { isletmeId } = req.params;
+
+    // Plan kontrolü — VIP analizi ve detaylı raporlar sadece aktif plan sahiplerine
+    const isletmeDoc = await Isletme.findById(isletmeId).select('premium');
+    const premiumAktif = !!(
+      isletmeDoc?.premium?.aktif &&
+      isletmeDoc.premium.bitis &&
+      new Date(isletmeDoc.premium.bitis) > new Date()
+    );
+
     const otuzGunOnce = new Date();
     otuzGunOnce.setDate(otuzGunOnce.getDate() - 30);
 
@@ -212,7 +254,7 @@ router.get('/isletme/:isletmeId/analitik', async (req, res) => {
 
     const sonOtuzGun = tumRandevular.filter(r => new Date(r.tarih) >= otuzGunOnce);
 
-    // Günlük istatistikler
+    // Günlük istatistikler (son 30 gün)
     const gunlukMap = {};
     sonOtuzGun.forEach(r => {
       const gun = new Date(r.tarih).toISOString().split('T')[0];
@@ -246,38 +288,58 @@ router.get('/isletme/:isletmeId/analitik', async (req, res) => {
     });
     const populerHizmetler = Object.values(hizmetMap).sort((a, b) => b.sayi - a.sayi).slice(0, 5);
 
-    // Müşteri segmentleri (isim listesi + ciro dahil)
+    // Müşteri segmentasyonu: SADECE tamamlanan randevular sayılır
     const musteriMap = {};
     tumRandevular.forEach(r => {
       if (!r.musteri) return;
       const id = r.musteri._id.toString();
-      if (!musteriMap[id]) musteriMap[id] = { ad: `${r.musteri.ad} ${r.musteri.soyad}`, sayi: 0, ciro: 0 };
-      musteriMap[id].sayi++;
-      if (r.durum === 'tamamlandi' && !r.hediyeMi) {
-        const tutar = Array.isArray(r.hizmet) ? r.hizmet.reduce((t, h) => t + (h.fiyat || 0), 0) : (r.hizmet?.fiyat || 0);
-        musteriMap[id].ciro += tutar;
+      if (!musteriMap[id]) musteriMap[id] = {
+        id,
+        ad: `${r.musteri.ad} ${r.musteri.soyad || ''}`.trim(),
+        tamamlananSayi: 0,
+        ciro: 0,
+      };
+      if (r.durum === 'tamamlandi') {
+        musteriMap[id].tamamlananSayi++;
+        if (!r.hediyeMi) {
+          const tutar = Array.isArray(r.hizmet) ? r.hizmet.reduce((t, h) => t + (h.fiyat || 0), 0) : (r.hizmet?.fiyat || 0);
+          musteriMap[id].ciro += tutar;
+        }
       }
     });
-    const musteriler = Object.values(musteriMap);
+    const musteriler = Object.values(musteriMap).filter(m => m.tamamlananSayi > 0);
 
-    const yeniListe = musteriler.filter(m => m.sayi === 1);
-    const duzenliListe = musteriler.filter(m => m.sayi >= 2 && m.sayi <= 4);
-    const vipListe = musteriler.filter(m => m.sayi >= 5);
-    const vipeYakinListe = musteriler.filter(m => m.sayi >= 3 && m.sayi < 5); // 1-2 ziyaret kalan
+    // Sadakat hedefini en az 1 kez dolduranlar da VIP sayılır
+    const sadakatVipIds = await Sadakat.distinct('musteri', {
+      isletme: isletmeId,
+      'kazanilanOduller.0': { $exists: true },
+    });
+    const sadakatVipSet = new Set(sadakatVipIds.map(id => id?.toString()));
+
+    // Segmentasyon kriterleri:
+    // Yeni: 1 tamamlanmış randevu
+    // Düzenli: 2–4 tamamlanmış randevu
+    // VIP: 5+ tamamlanmış randevu VEYA en az 1 kez sadakat ödülü kazanmış
+    // VIP'e Yakın: 3–4 tamamlanmış randevu, henüz sadakat ödülü yok
+    const yeniListe = musteriler.filter(m => m.tamamlananSayi === 1 && !sadakatVipSet.has(m.id));
+    const duzenliListe = musteriler.filter(m => m.tamamlananSayi >= 2 && m.tamamlananSayi <= 4 && !sadakatVipSet.has(m.id));
+    const vipListe = musteriler.filter(m => m.tamamlananSayi >= 5 || sadakatVipSet.has(m.id));
+    const vipeYakinListe = musteriler.filter(m => m.tamamlananSayi >= 3 && m.tamamlananSayi < 5 && !sadakatVipSet.has(m.id));
 
     const segmentler = {
       yeni: yeniListe.length,
       duzenli: duzenliListe.length,
       vip: vipListe.length,
-      yeniListe: yeniListe.sort((a,b) => b.ciro - a.ciro),
-      duzenliListe: duzenliListe.sort((a,b) => b.ciro - a.ciro),
-      vipListe: vipListe.sort((a,b) => b.ciro - a.ciro),
-      vipeYakinListe: vipeYakinListe.sort((a,b) => b.sayi - a.sayi),
+      yeniListe: yeniListe.sort((a, b) => b.ciro - a.ciro),
+      duzenliListe: duzenliListe.sort((a, b) => b.ciro - a.ciro),
+      // VIP listeleri sadece aktif planlı işletmelere gönderilir
+      vipListe: premiumAktif ? vipListe.sort((a, b) => b.ciro - a.ciro) : [],
+      vipeYakinListe: premiumAktif ? vipeYakinListe.sort((a, b) => b.tamamlananSayi - a.tamamlananSayi) : [],
       segmentCiro: {
-        yeni: yeniListe.reduce((t,m) => t + m.ciro, 0),
-        duzenli: duzenliListe.reduce((t,m) => t + m.ciro, 0),
-        vip: vipListe.reduce((t,m) => t + m.ciro, 0)
-      }
+        yeni: yeniListe.reduce((t, m) => t + m.ciro, 0),
+        duzenli: duzenliListe.reduce((t, m) => t + m.ciro, 0),
+        vip: premiumAktif ? vipListe.reduce((t, m) => t + m.ciro, 0) : 0,
+      },
     };
 
     res.json({
@@ -286,11 +348,12 @@ router.get('/isletme/:isletmeId/analitik', async (req, res) => {
         toplamRandevu: tumRandevular.length,
         tamamlanan: tumRandevular.filter(r => r.durum === 'tamamlandi').length,
         iptal: tumRandevular.filter(r => r.durum === 'reddedildi').length,
-        toplamCiro
+        toplamCiro,
       },
       populerHizmetler,
       segmentler,
-      topMusteriler: musteriler.sort((a, b) => b.sayi - a.sayi).slice(0, 5)
+      topMusteriler: musteriler.sort((a, b) => b.tamamlananSayi - a.tamamlananSayi).slice(0, 5),
+      planUyarisi: premiumAktif ? null : 'VIP analizi ve detaylı raporlar için planınızı yükseltin.',
     });
   } catch (hata) {
     res.status(500).json({ hata: hata.message });
@@ -356,9 +419,12 @@ router.get('/isletme/:isletmeId', async (req, res) => {
   }
 });
 
-// Müşterinin randevularını getir
-router.get('/musteri/:musteriId', async (req, res) => {
+// Müşterinin randevularını getir — sadece kendi randevuları
+router.get('/musteri/:musteriId', dogrulaToken, async (req, res) => {
   try {
+    if (req.kullanici.id !== req.params.musteriId) {
+      return res.status(403).json({ hata: 'Bu bilgilere erişim yetkiniz yok' });
+    }
     await otomatikTamamla();
     const randevular = await Randevu.find({ musteri: req.params.musteriId })
       .populate('isletme', 'isletmeAdi kategori adres')
@@ -369,14 +435,26 @@ router.get('/musteri/:musteriId', async (req, res) => {
   }
 });
 
-// Randevu iptal et (müşteri veya işletme kullanabilir)
-router.put('/:id/iptal', async (req, res) => {
+// Randevu iptal et — müşteri (kendi randevusu) veya işletme sahibi
+router.put('/:id/iptal', dogrulaToken, async (req, res) => {
   try {
     const randevu = await Randevu.findById(req.params.id);
     if (!randevu) return res.status(404).json({ hata: 'Randevu bulunamadı' });
     if (randevu.durum === 'tamamlandi') {
       return res.status(400).json({ hata: 'Tamamlanmış randevu iptal edilemez' });
     }
+
+    // Yetki kontrolü: müşteri mi yoksa işletme sahibi mi?
+    const isMusteri = randevu.musteri && randevu.musteri.toString() === req.kullanici.id;
+    let isIsletmeSahibi = false;
+    if (!isMusteri) {
+      const isletme = await Isletme.findById(randevu.isletme).select('sahip');
+      isIsletmeSahibi = isletme && isletme.sahip.toString() === req.kullanici.id;
+    }
+    if (!isMusteri && !isIsletmeSahibi) {
+      return res.status(403).json({ hata: 'Bu randevuyu iptal etme yetkiniz yok' });
+    }
+
     randevu.durum = 'iptal';
     await randevu.save();
     if (randevu.musteri) {
@@ -401,10 +479,10 @@ router.put('/:id/iptal', async (req, res) => {
   }
 });
 
-// Toplu tamamla (test için)
-router.put('/toplu-tamamla', async (req, res) => {
+// Toplu tamamla — sadece giriş yapmış kullanıcı kendi randevularını tamamlayabilir
+router.put('/toplu-tamamla', dogrulaToken, async (req, res) => {
   try {
-    const { musteriId } = req.body;
+    const musteriId = req.kullanici.id;
 
     // Tüm bekleyen/onaylanan randevuları getir
     const randevular = await Randevu.find({

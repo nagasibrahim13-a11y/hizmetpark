@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const Reklam = require('../models/Reklam');
+const Isletme = require('../models/Isletme');
+const { dogrulaToken } = require('../middleware/auth');
 
 // Aktif reklamları getir (müşteri sayfası için)
 router.get('/aktif', async (req, res) => {
@@ -28,9 +30,14 @@ router.get('/isletme/:isletmeId', async (req, res) => {
   }
 });
 
-// Reklam oluştur
-router.post('/', async (req, res) => {
+// Reklam oluştur — sadece işletme sahibi
+router.post('/', dogrulaToken, async (req, res) => {
   try {
+    const isletmeDoc = await Isletme.findById(req.body.isletme).select('sahip');
+    if (!isletmeDoc) return res.status(404).json({ hata: 'İşletme bulunamadı' });
+    if (isletmeDoc.sahip.toString() !== req.kullanici.id) {
+      return res.status(403).json({ hata: 'Bu işlem için yetkiniz yok' });
+    }
     const reklam = await Reklam.create(req.body);
     res.status(201).json({ mesaj: 'Reklam oluşturuldu', reklam });
   } catch (hata) {
